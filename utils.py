@@ -1,5 +1,5 @@
-from langchain.schema import HumanMessage
-from langchain.schema.runnable import RunnableConfig
+from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.prebuilt import create_react_agent
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_google_genai import ChatGoogleGenerativeAI
