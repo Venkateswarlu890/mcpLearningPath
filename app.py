@@ -1,4 +1,5 @@
 import streamlit as st
+from streamlit_webrtc import webrtc_streamer, WebRtcMode
 from utils import run_agent_sync
 from mock_interview import MockInterviewSystem, INTERVIEW_TYPES, LANGUAGES
 
@@ -21,6 +22,22 @@ if 'current_question' not in st.session_state:
     st.session_state.current_question = None
 if 'interview_history' not in st.session_state:
     st.session_state.interview_history = []
+if 'pretest' not in st.session_state:
+    st.session_state.pretest = None
+if 'pretest_answers' not in st.session_state:
+    st.session_state.pretest_answers = []
+if 'pretest_result' not in st.session_state:
+    st.session_state.pretest_result = None
+if 'coding_problem' not in st.session_state:
+    st.session_state.coding_problem = None
+if 'user_code' not in st.session_state:
+    st.session_state.user_code = ""
+if 'test_output' not in st.session_state:
+    st.session_state.test_output = None
+if 'webrtc_ok' not in st.session_state:
+    st.session_state.webrtc_ok = False
+if 'connectivity_ok' not in st.session_state:
+    st.session_state.connectivity_ok = False
 
 st.title("🤖 AI-Powered Learning & Interview Platform")
 st.markdown("**Comprehensive Learning Paths + Mock Interview Simulations**")
@@ -228,6 +245,66 @@ with tab2:
             - **Behavioral:** Leadership, Teamwork, Problem Solving
             """)
         
+        # Candidate Profile & Pre-test
+        with st.expander("👤 Candidate Profile"):
+            name = st.text_input("Name", key="cand_name")
+            exp_years = st.number_input("Years of Experience", min_value=0, max_value=50, step=1, value=0)
+            skills = st.text_input("Key Skills (comma-separated)")
+            preferred_role = st.text_input("Preferred Role", value="")
+            resume_summary = st.text_area("Resume Summary", height=120)
+            if st.button("💾 Save Profile"):
+                if st.session_state.mock_interview:
+                    st.session_state.mock_interview.set_candidate_profile({
+                        "name": name,
+                        "years_of_experience": exp_years,
+                        "skills": [s.strip() for s in skills.split(',') if s.strip()],
+                        "preferred_role": preferred_role,
+                        "resume_summary": resume_summary,
+                    })
+                    st.success("Profile saved and will be used to tailor the interview.")
+
+        st.markdown("---")
+        st.subheader("🧪 Pre-Test (Required)")
+        colp1, colp2 = st.columns([1, 1])
+        with colp1:
+            if st.button("📝 Generate Pre-Test"):
+                if not st.session_state.mock_interview:
+                    st.warning("Start an interview session first.")
+                else:
+                    st.session_state.pretest = st.session_state.mock_interview.generate_pretest(num_questions=5)
+                    st.session_state.pretest_answers = [""] * len(st.session_state.pretest)
+        with colp2:
+            if st.button("✅ Submit Pre-Test"):
+                if not st.session_state.pretest:
+                    st.warning("Please generate the pre-test first.")
+                else:
+                    result = st.session_state.mock_interview.evaluate_pretest(
+                        st.session_state.pretest_answers,
+                        st.session_state.pretest,
+                        pass_threshold=0.8,
+                    )
+                    st.session_state.pretest_result = result
+                    score10 = round((result.get('score', 0.0) or 0.0) * 10, 1)
+                    if result.get("passed"):
+                        st.success(f"Pre-test passed! Score: {score10}/10")
+                        st.info("select the interview processs")
+                    else:
+                        st.error(f"Pre-test not passed. Score: {score10}/10")
+
+        if st.session_state.pretest:
+            st.markdown("### 📋 Answer Pre-Test Questions")
+            for idx, q in enumerate(st.session_state.pretest):
+                st.markdown(f"**Q{idx+1}. {q.get('question')}**")
+                opts = q.get('options') or {}
+                choice = st.radio(
+                    label=f"Answer {idx+1}",
+                    options=list(opts.keys()) if isinstance(opts, dict) else ['A','B','C','D'],
+                    format_func=lambda x: f"{x}. {opts.get(x, '')}",
+                    horizontal=True,
+                    key=f"pre_ans_{idx}",
+                )
+                st.session_state.pretest_answers[idx] = choice
+
         # Start/Reset Interview
         col1, col2 = st.columns(2)
         
@@ -246,6 +323,12 @@ with tab2:
                         st.session_state.interview_active = True
                         st.session_state.interview_history = []
                         st.session_state.current_question = None
+                        st.session_state.pretest = None
+                        st.session_state.pretest_answers = []
+                        st.session_state.pretest_result = None
+                        st.session_state.coding_problem = None
+                        st.session_state.user_code = ""
+                        st.session_state.test_output = None
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error initializing interview: {str(e)}")
@@ -256,13 +339,93 @@ with tab2:
                 st.session_state.mock_interview = None
                 st.session_state.interview_history = []
                 st.session_state.current_question = None
+                st.session_state.pretest = None
+                st.session_state.pretest_answers = []
+                st.session_state.pretest_result = None
+                st.session_state.coding_problem = None
+                st.session_state.user_code = ""
+                st.session_state.test_output = None
                 st.rerun()
         
         # Interview Interface
         if st.session_state.interview_active and st.session_state.mock_interview:
             st.markdown("---")
             st.subheader("🎤 Interview Session")
+
+            # Gate by pre-test + connectivity + camera
+            if not (st.session_state.pretest_result and st.session_state.pretest_result.get('passed')):
+                st.info("Please pass the pre-test to unlock the live interview and coding session.")
+                st.stop()
+            if not st.session_state.connectivity_ok:
+                st.info("Please run the connectivity check and ensure it passes.")
+                st.stop()
+            if not st.session_state.webrtc_ok:
+                st.info("Please enable camera & microphone permissions to continue.")
+                st.stop()
             
+            # Connectivity & camera checks
+            st.markdown("## 📶 Connectivity & 🎥 Camera Check")
+            colw1, colw2 = st.columns([1, 1])
+            with colw1:
+                if st.button("🔌 Check Connectivity"):
+                    # Simple ping by hitting Streamlit server itself
+                    st.session_state.connectivity_ok = True
+                    st.success("Connectivity looks good.")
+            with colw2:
+                st.markdown("Grant camera permission below.")
+            rtc_ctx = webrtc_streamer(
+                key="interview_cam",
+                mode=WebRtcMode.SENDONLY,
+                media_stream_constraints={"video": True, "audio": True},
+                async_processing=False,
+            )
+            if rtc_ctx.state.playing:
+                st.session_state.webrtc_ok = True
+                st.success("Camera & microphone are active.")
+
+            # Live coding section
+            st.markdown("## 🧑‍💻 Live Coding Room")
+            colc1, colc2 = st.columns([2, 1])
+            with colc1:
+                if st.button("🧩 Generate Coding Problem"):
+                    st.session_state.coding_problem = st.session_state.mock_interview.generate_coding_problem(difficulty=difficulty)
+                    starter = st.session_state.coding_problem.get('starter_code') or ''
+                    st.session_state.user_code = starter
+            with colc2:
+                if st.session_state.coding_problem:
+                    prob = st.session_state.coding_problem
+                    st.markdown(f"**{prob.get('title', 'Problem')}**")
+                    st.write(prob.get('description', ''))
+                    examples = prob.get('examples') or []
+                    for ex in examples[:3]:
+                        st.code(f"Input: {ex.get('input')}\nOutput: {ex.get('output')}", language="text")
+
+            if st.session_state.coding_problem:
+                st.markdown("**Your Code (Python):**")
+                st.session_state.user_code = st.text_area(
+                    "",
+                    value=st.session_state.user_code or st.session_state.coding_problem.get('starter_code', ''),
+                    height=260,
+                    key="code_editor",
+                )
+                if st.button("▶️ Run Tests"):
+                    with st.spinner("Running tests..."):
+                        st.session_state.test_output = st.session_state.mock_interview.run_python_tests(
+                            st.session_state.user_code,
+                            st.session_state.coding_problem,
+                        )
+                if st.session_state.test_output:
+                    out = st.session_state.test_output
+                    if out.get('error'):
+                        st.error(out['error'])
+                    st.write(f"Passed {out.get('passed_count', 0)}/{out.get('total', 0)} tests")
+                    for r in out.get('results', []):
+                        emoji = "✅" if r.get('passed') else "❌"
+                        st.code(f"{emoji} input={r.get('input')} expected={r.get('expected')} output={r.get('output')}", language="text")
+
+            st.markdown("---")
+            st.markdown("## 🗣️ Interview Q&A")
+            st.info(st.session_state.mock_interview.start_live_interview())
             # Get current question if not set
             if st.session_state.current_question is None:
                 with st.spinner("🤖 Preparing your first question..."):

@@ -5,6 +5,7 @@ from typing import Optional, Callable, Any, List, Dict
 import asyncio
 import json
 import re
+import textwrap
 
 # Interview configurations
 INTERVIEW_TYPES = {
@@ -40,6 +41,17 @@ class MockInterviewSystem:
         self.interview_type = None
         self.language = "english"
         self.difficulty = "intermediate"
+        # Candidate profile/context to tailor the interview
+        self.candidate_profile: Dict[str, Any] = {
+            "name": None,
+            "years_of_experience": None,
+            "skills": [],
+            "preferred_role": None,
+            "resume_summary": None,
+        }
+        # Pre-test state
+        self.pretest_passed: bool = False
+        self.pretest_result: Dict[str, Any] = {}
         
     def initialize_interview(self, interview_type: str, role: str, language: str = "english", difficulty: str = "intermediate"):
         """Initialize the mock interview session"""
@@ -49,6 +61,8 @@ class MockInterviewSystem:
         self.difficulty = difficulty
         self.current_question_index = 0
         self.conversation_history = []
+        self.pretest_passed = False
+        self.pretest_result = {}
         
         # Create interview setup prompt
         setup_prompt = self._create_setup_prompt()
@@ -68,9 +82,21 @@ class MockInterviewSystem:
             "advanced": "Ask challenging questions that test deep understanding and problem-solving skills."
         }
         
+        candidate_context = ""
+        if any(self.candidate_profile.values()):
+            candidate_context = (
+                f"Candidate Context:\n"
+                f"- Name: {self.candidate_profile.get('name') or 'N/A'}\n"
+                f"- Experience: {self.candidate_profile.get('years_of_experience') or 'N/A'} years\n"
+                f"- Skills: {', '.join(self.candidate_profile.get('skills') or []) or 'N/A'}\n"
+                f"- Preferred Role: {self.candidate_profile.get('preferred_role') or 'N/A'}\n"
+                f"- Resume Summary: {self.candidate_profile.get('resume_summary') or 'N/A'}\n"
+            )
+
         prompt = f"""
 You are an expert {self.interview_type} interviewer conducting a mock interview for a {self.role} position.
 
+{candidate_context}
 {difficulty_instructions.get(self.difficulty, difficulty_instructions["intermediate"])}
 {language_instructions.get(self.language, language_instructions["english"])}
 
@@ -86,9 +112,175 @@ Interview Guidelines:
 Start the interview with a brief introduction and your first question.
 """
         return prompt
+
+    def set_candidate_profile(self, profile: Dict[str, Any]) -> None:
+        """Set or update candidate profile for tailoring interview."""
+        self.candidate_profile.update(profile or {})
+
+    def generate_pretest(self, num_questions: int = 5) -> List[Dict[str, Any]]:
+        """Generate a short pre-test to gate the live interview."""
+        skill_hint = ", ".join(self.candidate_profile.get("skills") or [])
+        resume_snippet = self.candidate_profile.get("resume_summary") or ""
+        prompt = f"""
+Create a {num_questions}-question multiple-choice pre-test for a candidate applying for {self.role}.
+Tailor difficulty to {self.difficulty} and {self.interview_type}. Consider candidate skills: {skill_hint}.
+Resume context: {resume_snippet}
+Return JSON list where each item has: question, options (A-D), correct_option (A-D).
+"""
+        try:
+            response = self.model.invoke([HumanMessage(content=prompt)])
+            content = response.content
+            json_match = re.search(r"\[.*\]", content, re.DOTALL)
+            if json_match:
+                questions = json.loads(json_match.group())
+                return questions
+        except Exception:
+            pass
+        # Fallback simple pretest
+        return [
+            {
+                "question": "Which data structure is immutable in Python?",
+                "options": {"A": "List", "B": "Dictionary", "C": "Tuple", "D": "Set"},
+                "correct_option": "C",
+            }
+        ]
+
+    def evaluate_pretest(self, answers: List[str], questions: List[Dict[str, Any]], pass_threshold: float = 0.6) -> Dict[str, Any]:
+        """Evaluate pre-test answers and set pass state."""
+        total = min(len(answers), len(questions))
+        correct = 0
+        details: List[Dict[str, Any]] = []
+        for idx in range(total):
+            q = questions[idx]
+            correct_option = (q.get("correct_option") or "").strip().upper()
+            user_option = (answers[idx] or "").strip().upper()
+            is_correct = user_option == correct_option
+            if is_correct:
+                correct += 1
+            details.append({
+                "question": q.get("question"),
+                "selected": user_option,
+                "correct": correct_option,
+                "is_correct": is_correct,
+            })
+        score = (correct / total) if total else 0.0
+        passed = score >= pass_threshold
+        self.pretest_passed = passed
+        self.pretest_result = {
+            "total": total,
+            "correct": correct,
+            "score": score,
+            "passed": passed,
+            "details": details,
+        }
+        return self.pretest_result
+
+    def start_live_interview(self) -> str:
+        """Prepare the AI Agent live interview introduction. Requires pre-test pass."""
+        if not self.pretest_passed:
+            return "Pre-test not passed. Complete and pass the pre-test to start the live interview."
+        agent_intro = (
+            "You are an AI Interview Agent conducting a face-to-face style live interview. "
+            "Follow real-time, adaptive questioning, ask one question at a time, and wait for candidate responses. "
+            "Be empathetic, professional, and keep the session focused on the candidate's profile and role."
+        )
+        return agent_intro
+
+    # ===== Real-time Coding Interview Helpers =====
+    def generate_coding_problem(self, difficulty: Optional[str] = None) -> Dict[str, Any]:
+        """Ask LLM to produce a coding problem statement with examples and hidden tests."""
+        level = difficulty or self.difficulty
+        skills = ", ".join(self.candidate_profile.get("skills") or [])
+        prompt = f"""
+Create one coding interview problem suitable for a live coding session.
+Target role: {self.role}. Difficulty: {level}. Candidate skills: {skills}.
+Return as JSON with fields: title, description, function_signature (Python), examples (array of {{input, output}}), starter_code, and tests (array of {{input, expected}}). Keep tests concise.
+"""
+        try:
+            response = self.model.invoke([HumanMessage(content=prompt)])
+            content = response.content
+            json_match = re.search(r"\{.*\}", content, re.DOTALL)
+            if json_match:
+                problem = json.loads(json_match.group())
+                return problem
+        except Exception:
+            pass
+
+        # Fallback simple problem
+        return {
+            "title": "Reverse String",
+            "description": "Given a string s, return the reverse of s.",
+            "function_signature": "def reverse_string(s: str) -> str:",
+            "examples": [{"input": "hello", "output": "olleh"}],
+            "starter_code": "def reverse_string(s: str) -> str:\n    # TODO: implement\n    return ''\n",
+            "tests": [
+                {"input": "hello", "expected": "olleh"},
+                {"input": "", "expected": ""},
+                {"input": "a", "expected": "a"}
+            ],
+        }
+
+    def run_python_tests(self, user_code: str, problem: Dict[str, Any]) -> Dict[str, Any]:
+        """Very lightweight exec-based runner to validate deterministic examples. Not for untrusted code in production."""
+        namespace: Dict[str, Any] = {}
+        results: List[Dict[str, Any]] = []
+        error: Optional[str] = None
+        try:
+            full_code = textwrap.dedent(user_code)
+            exec(full_code, namespace)  # WARNING: Unsafe; acceptable for local mock usage only
+            # Infer function name from signature or starter
+            func_name = None
+            sig = problem.get("function_signature") or ""
+            m = re.search(r"def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\(", sig)
+            if m:
+                func_name = m.group(1)
+            if not func_name:
+                error = "Unable to infer function name from signature."
+            else:
+                func = namespace.get(func_name)
+                if not callable(func):
+                    error = f"Function {func_name} not found or not callable."
+                else:
+                    for t in problem.get("tests", []):
+                        test_input = t.get("input")
+                        expected = t.get("expected")
+                        try:
+                            output = func(test_input)
+                            passed = output == expected
+                            results.append({
+                                "input": test_input,
+                                "expected": expected,
+                                "output": output,
+                                "passed": passed,
+                            })
+                        except Exception as inner_e:
+                            results.append({
+                                "input": test_input,
+                                "expected": expected,
+                                "output": str(inner_e),
+                                "passed": False,
+                            })
+        except Exception as e:
+            error = str(e)
+
+        summary = {
+            "passed": all(r.get("passed") for r in results) if results else False,
+            "total": len(results),
+            "passed_count": sum(1 for r in results if r.get("passed")),
+            "error": error,
+            "results": results,
+        }
+        return summary
     
     def get_next_question(self, candidate_response: str = "") -> Dict[str, Any]:
         """Get the next interview question based on candidate's response"""
+        if not self.pretest_passed:
+            return {
+                "question": "Pre-test not passed. Please complete and pass the pre-test to proceed to the live interview.",
+                "feedback": "",
+                "question_number": 0,
+                "total_questions": 0
+            }
         if not self.conversation_history:
             # First question
             initial_prompt = self._create_setup_prompt()
