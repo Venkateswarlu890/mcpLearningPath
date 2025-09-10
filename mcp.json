@@ -1,0 +1,22 @@
+{
+    "mcpServers": {
+      "LinkedIn": { 
+        "url": "https://mcp.pipedream.net/5bfeb44e-77b3-4642-9538-1301e356ff5a/linkedin"
+      },
+      "Gmail": {
+        "url": "https://mcp.pipedream.net/5bfeb44e-77b3-4642-9538-1301e356ff5a/gmail"
+      },
+      "Google Drive": {
+        "url": "https://mcp.pipedream.net/5bfeb44e-77b3-4642-9538-1301e356ff5a/googledrive"
+      },
+      "YouTube": {
+        "url": "https://mcp.pipedream.net/5bfeb44e-77b3-4642-9538-1301e356ff5a/youtube"
+      },
+      "Notion": {
+        "url": "https://mcp.pipedream.net/5bfeb44e-77b3-4642-9538-1301e356ff5a/notion"
+      },
+      "google sheets": {
+        "url": "https://mcp.pipedream.net/5bfeb44e-77b3-4642-9538-1301e356ff5a/googlesheets"
+      }
+    }
+  }

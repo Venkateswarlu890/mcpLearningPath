@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import textwrap
+from voice_assistant import VoiceAssistant, VoiceCommandType
 
 # Interview configurations
 INTERVIEW_TYPES = {
@@ -52,6 +53,11 @@ class MockInterviewSystem:
         # Pre-test state
         self.pretest_passed: bool = False
         self.pretest_result: Dict[str, Any] = {}
+        
+        # Voice assistant integration
+        self.voice_assistant = VoiceAssistant(mock_interview_system=self)
+        self.voice_enabled = False
+        self.current_question = None
         
     def initialize_interview(self, interview_type: str, role: str, language: str = "english", difficulty: str = "intermediate"):
         """Initialize the mock interview session"""
@@ -112,7 +118,7 @@ Interview Guidelines:
 Start the interview with a brief introduction and your first question.
 """
         return prompt
-
+    
     def set_candidate_profile(self, profile: Dict[str, Any]) -> None:
         """Set or update candidate profile for tailoring interview."""
         self.candidate_profile.update(profile or {})
@@ -185,7 +191,7 @@ Return JSON list where each item has: question, options (A-D), correct_option (A
             "Be empathetic, professional, and keep the session focused on the candidate's profile and role."
         )
         return agent_intro
-
+    
     # ===== Real-time Coding Interview Helpers =====
     def generate_coding_problem(self, difficulty: Optional[str] = None) -> Dict[str, Any]:
         """Ask LLM to produce a coding problem statement with examples and hidden tests."""
@@ -205,7 +211,7 @@ Return as JSON with fields: title, description, function_signature (Python), exa
                 return problem
         except Exception:
             pass
-
+        
         # Fallback simple problem
         return {
             "title": "Reverse String",
@@ -297,12 +303,21 @@ Return as JSON with fields: title, description, function_signature (Python), exa
             content = response.content
             question, feedback = self._parse_response(content)
             
-            return {
+            question_data = {
                 "question": question,
                 "feedback": feedback,
                 "question_number": self.current_question_index + 1,
                 "total_questions": 10  # We'll do 10 questions per session
             }
+            
+            # Store current question for voice assistant
+            self.current_question = question_data
+            
+            # Speak the question if voice is enabled
+            if self.voice_enabled and self.voice_assistant:
+                self.voice_assistant.speak(f"Question {question_data['question_number']}: {question}")
+            
+            return question_data
         except Exception as e:
             return {
                 "question": f"Error generating question: {str(e)}",
@@ -460,6 +475,76 @@ Format as JSON:
                 "next_steps": ["Continue learning", "Practice regularly"],
                 "detailed_feedback": f"Error generating report: {str(e)}"
             }
+    
+    # Voice Assistant Integration Methods
+    def enable_voice_mode(self):
+        """Enable voice interaction mode"""
+        self.voice_enabled = True
+        if self.voice_assistant:
+            self.voice_assistant.speak("Voice mode enabled. You can now use voice commands during the interview.")
+    
+    def disable_voice_mode(self):
+        """Disable voice interaction mode"""
+        self.voice_enabled = False
+        if self.voice_assistant:
+            self.voice_assistant.speak("Voice mode disabled.")
+    
+    def process_voice_command(self, voice_text: str) -> str:
+        """Process voice command and return response"""
+        if not self.voice_enabled or not self.voice_assistant:
+            return "Voice mode is not enabled."
+        
+        # Process the voice input through the assistant
+        command = self.voice_assistant.process_voice_input(voice_text)
+        response = self.voice_assistant.execute_command(command)
+        
+        return response
+    
+    def start_voice_listening(self):
+        """Start continuous voice listening"""
+        if self.voice_enabled and self.voice_assistant:
+            self.voice_assistant.start_continuous_listening()
+            return "Voice listening started. Say 'help' for available commands."
+        return "Voice mode is not enabled."
+    
+    def stop_voice_listening(self):
+        """Stop continuous voice listening"""
+        if self.voice_assistant:
+            self.voice_assistant.stop_continuous_listening()
+            return "Voice listening stopped."
+        return "Voice assistant not available."
+    
+    def speak_question(self, question_data: Dict[str, Any]):
+        """Speak the current question"""
+        if self.voice_enabled and self.voice_assistant and question_data:
+            question_text = f"Question {question_data.get('question_number', 1)}: {question_data.get('question', '')}"
+            self.voice_assistant.speak(question_text)
+    
+    def speak_feedback(self, evaluation: Dict[str, Any]):
+        """Speak evaluation feedback"""
+        if self.voice_enabled and self.voice_assistant and evaluation:
+            overall_score = evaluation.get('overall_score', 0)
+            feedback_text = f"Your overall score is {overall_score} out of 10. {evaluation.get('feedback', '')}"
+            self.voice_assistant.speak(feedback_text)
+    
+    def speak_final_report(self, report: Dict[str, Any]):
+        """Speak the final interview report"""
+        if self.voice_enabled and self.voice_assistant and report:
+            overall_score = report.get('overall_score', 0)
+            report_text = f"Interview completed. Your overall score is {overall_score} out of 10. "
+            
+            # Add key strengths
+            strengths = report.get('strengths', [])
+            if strengths:
+                report_text += f"Your key strengths include: {', '.join(strengths[:3])}. "
+            
+            # Add recommendations
+            recommendations = report.get('recommendations', [])
+            if recommendations:
+                report_text += f"Recommendations for improvement: {', '.join(recommendations[:2])}."
+            
+            self.voice_assistant.speak(report_text)
+    
 
 def create_interview_questions(role: str, interview_type: str, language: str = "english") -> List[str]:
     """Generate sample interview questions based on role and type"""

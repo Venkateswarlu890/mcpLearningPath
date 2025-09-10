@@ -2,5 +2,12 @@ langchain
 langgraph
 langchain-mcp-adapters
 langchain-google-genai
-streamlit
-streamlit-webrtc
+streamlit>=1.26
+streamlit-webrtc>=0.47.1
+aiortc>=1.5.0
+av>=10.0.0
+speechrecognition
+pyttsx3
+scikit-learn<1.6
+numpy<2
+pyaudio; platform_system=="Windows"
