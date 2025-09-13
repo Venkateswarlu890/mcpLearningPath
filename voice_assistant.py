@@ -28,6 +28,7 @@ class VoiceCommandType(Enum):
     EVALUATE_ANSWER = "evaluate_answer"
     END_INTERVIEW = "end_interview"
     HELP = "help"
+    PREPARE_QUESTIONS = "prepare_questions"
     UNKNOWN = "unknown"
 
 @dataclass
@@ -123,6 +124,12 @@ class VoiceClassifier:
             VoiceCommandType.HELP: [
                 "help", "what can you do", "commands", "assistance", "guide me",
                 "how to use", "what are the options"
+            ],
+            VoiceCommandType.PREPARE_QUESTIONS: [
+                "prepare questions on python", "create interview questions about data science",
+                "ask questions for frontend", "generate questions for machine learning",
+                "prepare questions on algorithms", "make some interview questions about sql",
+                "give me questions on react"
             ]
         }
         
@@ -192,6 +199,11 @@ class VoiceClassifier:
                 parameters['type'] = 'technical'
             elif 'behavioral' in text:
                 parameters['type'] = 'behavioral'
+        elif command_type == VoiceCommandType.PREPARE_QUESTIONS:
+            # Attempt to extract topic/role after keywords like on/about/for/in
+            m = re.search(r"(?:on|about|for|in)\s+([a-zA-Z0-9_\-\s]+)$", text)
+            if m:
+                parameters['topic'] = m.group(1).strip()
         
         return parameters
 
@@ -362,6 +374,8 @@ class VoiceAssistant:
             return self._handle_end_interview(command)
         elif command.command_type == VoiceCommandType.HELP:
             return self._handle_help(command)
+        elif command.command_type == VoiceCommandType.PREPARE_QUESTIONS:
+            return self._handle_prepare_questions(command)
         else:
             return "I didn't understand that command. Please try again or say 'help' for available commands."
     
@@ -416,6 +430,22 @@ class VoiceAssistant:
         response = "Ending the interview. Generating your final report now."
         self.speak(response)
         return response
+
+    def _handle_prepare_questions(self, command: VoiceCommand) -> str:
+        """Generate interview questions based on user's requested topic via voice."""
+        if not self.mock_interview:
+            return "Mock interview system not available."
+        topic = (command.parameters or {}).get('topic') or command.raw_text
+        try:
+            questions = self.mock_interview.generate_questions_from_topic(topic=topic, num_questions=5)
+            if not questions:
+                return "I couldn't generate questions right now. Please try again."
+            # Speak the first question and return the list
+            self.speak(f"First question: {questions[0]}")
+            formatted = "\n".join([f"{i+1}. {q}" for i, q in enumerate(questions)])
+            return f"Prepared questions for '{topic}':\n{formatted}"
+        except Exception as e:
+            return f"Error preparing questions: {str(e)}"
     
     def _handle_help(self, command: VoiceCommand) -> str:
         """Handle help command"""

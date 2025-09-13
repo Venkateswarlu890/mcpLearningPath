@@ -58,6 +58,9 @@ class MockInterviewSystem:
         self.voice_assistant = VoiceAssistant(mock_interview_system=self)
         self.voice_enabled = False
         self.current_question = None
+        # Adaptive context
+        self.last_evaluation: Dict[str, Any] = {}
+        self.non_verbal_notes: str = ""
         
     def initialize_interview(self, interview_type: str, role: str, language: str = "english", difficulty: str = "intermediate"):
         """Initialize the mock interview session"""
@@ -122,6 +125,10 @@ Start the interview with a brief introduction and your first question.
     def set_candidate_profile(self, profile: Dict[str, Any]) -> None:
         """Set or update candidate profile for tailoring interview."""
         self.candidate_profile.update(profile or {})
+
+    def update_non_verbal_notes(self, notes: str) -> None:
+        """Update notes about candidate's non-verbal cues (confidence, clarity, body language)."""
+        self.non_verbal_notes = (notes or "").strip()
 
     def generate_pretest(self, num_questions: int = 5) -> List[Dict[str, Any]]:
         """Generate a short pre-test to gate the live interview."""
@@ -226,6 +233,24 @@ Return as JSON with fields: title, description, function_signature (Python), exa
             ],
         }
 
+    def generate_questions_from_topic(self, topic: str, num_questions: int = 5) -> List[str]:
+        """Generate a list of interview questions based on a user-provided topic or role."""
+        topic = (topic or "").strip()
+        if not topic:
+            return []
+        guide = f"Generate {num_questions} professional interview questions about '{topic}' tailored for a {self.role} role. One line per question, concise, no answers."
+        try:
+            response = self.model.invoke([HumanMessage(content=guide)])
+            lines = [l.strip("- ") for l in response.content.splitlines() if l.strip()]
+            # Filter likely question lines
+            questions = [l for l in lines if l.endswith("?") or l.lower().startswith(("what", "how", "why", "when", "where", "which", "explain", "describe", "tell"))]
+            if not questions:
+                questions = lines[:num_questions]
+            return questions[:num_questions]
+        except Exception:
+            # Minimal fallback
+            return [f"Tell me about your experience with {topic}.", f"What are key challenges in {topic}?", f"How do you approach problems in {topic}?", f"Explain a project using {topic}.", f"What best practices do you follow in {topic}?"]
+
     def run_python_tests(self, user_code: str, problem: Dict[str, Any]) -> Dict[str, Any]:
         """Very lightweight exec-based runner to validate deterministic examples. Not for untrusted code in production."""
         namespace: Dict[str, Any] = {}
@@ -279,7 +304,7 @@ Return as JSON with fields: title, description, function_signature (Python), exa
         return summary
     
     def get_next_question(self, candidate_response: str = "") -> Dict[str, Any]:
-        """Get the next interview question based on candidate's response"""
+        """Get the next interview question based on candidate's response with adaptive follow-ups and optional hints."""
         if not self.pretest_passed:
             return {
                 "question": "Pre-test not passed. Please complete and pass the pre-test to proceed to the live interview.",
@@ -287,13 +312,35 @@ Return as JSON with fields: title, description, function_signature (Python), exa
                 "question_number": 0,
                 "total_questions": 0
             }
+        # Build adaptive context
+        adaptive_clues = ""
+        if self.last_evaluation:
+            strengths = ", ".join(self.last_evaluation.get("strengths", [])[:3])
+            improvements = ", ".join(self.last_evaluation.get("improvements", [])[:3])
+            next_hint = self.last_evaluation.get("next_question") or ""
+            adaptive_clues = (
+                f"Prior evaluation summary:\n"
+                f"- Strengths: {strengths or 'N/A'}\n"
+                f"- Improvements: {improvements or 'N/A'}\n"
+                f"- Suggested next focus: {next_hint or 'N/A'}\n"
+            )
+        non_verbal = f"Non-verbal cues noted: {self.non_verbal_notes}" if self.non_verbal_notes else ""
+        adaptive_instructions = f"""
+Act like a realistic face-to-face interviewer. Ask one question at a time and wait for the candidate.
+If the candidate appears to struggle (uncertain language like 'not sure', or very brief response), give a gentle hint BEFORE asking the follow-up. Keep tone supportive but professional.
+Consider any non-verbal notes if provided and keep sessions time-bounded.
+{adaptive_clues}
+{non_verbal}
+Only output the next interviewer utterance (question and, if needed, one short hint), not JSON.
+"""
+
         if not self.conversation_history:
-            # First question
-            initial_prompt = self._create_setup_prompt()
-            messages = [HumanMessage(content=initial_prompt)]
+            # First question with intro
+            initial_prompt = self._create_setup_prompt() + "\nIntroduce yourself briefly, reassure the candidate, and ask the first tailored question."
+            messages = [HumanMessage(content=initial_prompt + "\n\n" + adaptive_instructions)]
         else:
             # Continue conversation
-            messages = self.conversation_history + [HumanMessage(content=candidate_response)]
+            messages = self.conversation_history + [HumanMessage(content=candidate_response), HumanMessage(content=adaptive_instructions)]
         
         try:
             response = self.model.invoke(messages)
@@ -380,9 +427,11 @@ Format your response as JSON:
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:
                 evaluation = json.loads(json_match.group())
+                # Persist for adaptive follow-ups
+                self.last_evaluation = evaluation
                 return evaluation
             else:
-                return {
+                fallback = {
                     "technical_score": 7,
                     "communication_score": 7,
                     "problem_solving_score": 7,
@@ -392,8 +441,10 @@ Format your response as JSON:
                     "feedback": content,
                     "next_question": "Continue with next question"
                 }
+                self.last_evaluation = fallback
+                return fallback
         except Exception as e:
-            return {
+            err_eval = {
                 "technical_score": 5,
                 "communication_score": 5,
                 "problem_solving_score": 5,
@@ -403,6 +454,8 @@ Format your response as JSON:
                 "feedback": f"Error in evaluation: {str(e)}",
                 "next_question": "Continue with next question"
             }
+            self.last_evaluation = err_eval
+            return err_eval
     
     def generate_final_report(self) -> Dict[str, Any]:
         """Generate a comprehensive final report of the interview"""

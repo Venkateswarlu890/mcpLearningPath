@@ -10,6 +10,11 @@ This project is a Streamlit-based web application that generates personalized le
 - 📝 Notion integration for note-taking and organization
 - 🚀 Real-time progress tracking
 - 🎨 User-friendly Streamlit interface
+- 🔐 **NEW**: Secure user authentication and account management
+- 💾 **NEW**: Automatic saving of learning paths and interview sessions
+- 👤 **NEW**: User profiles with progress history
+- 🎯 **NEW**: Mock interview sessions with AI evaluation
+- 🎤 **NEW**: Voice assistant for hands-free interaction
 
 ## Prerequisites
 
@@ -20,12 +25,33 @@ This project is a Streamlit-based web application that generates personalized le
 ## Installation
 
 1. Clone the repository:
+```bash
+git clone <repository-url>
+cd mcpLearningPath
+```
 
 2. Create and activate a virtual environment:
+```bash
+python -m venv venv
+# Windows
+venv\Scripts\activate
+# macOS/Linux
+source venv/bin/activate
+```
 
 3. Install the required packages:
 ```bash
 pip install -r requirements.txt
+```
+
+4. Initialize the database:
+```bash
+python init_database.py
+```
+
+5. (Optional) Test the authentication system:
+```bash
+python test_auth.py
 ```
 
 ## Configuration
@@ -48,19 +74,63 @@ The application will be available at `http://localhost:8501` by default.
 
 ## Usage
 
-1. Enter your Google ai studio API key and Pipedream URLs in the sidebar
-2. Select your preferred secondary tool (Drive or Notion)
-3. Enter your learning goal (e.g., "I want to learn python basics in 3 days")
-4. Click "Generate Learning Path" to create your personalized learning plan
+### Getting Started
+1. **Register an Account**: Click "Register" in the sidebar to create your account
+2. **Login**: Use your credentials to login and access all features
+3. **Configure APIs**: Enter your Google AI Studio API key and Pipedream URLs in the sidebar
+
+### Learning Path Generator
+1. Select your preferred secondary tool (Drive or Notion)
+2. Enter your learning goal (e.g., "I want to learn python basics in 3 days")
+3. Click "Generate Learning Path" to create your personalized learning plan
+4. Your learning paths are automatically saved to your profile
+
+### Mock Interview Simulator
+1. Configure interview settings (type, role, language, difficulty)
+2. Fill in your candidate profile for personalized questions
+3. Take the pre-test to unlock live interview features
+4. Complete the interview with AI evaluation and feedback
+5. View your final report and recommendations
+6. All interview sessions are saved to your profile
+
+### Voice Assistant
+1. Enable voice mode in the interview section
+2. Use voice commands like "start interview", "next question", "repeat question"
+3. Get hands-free interview experience with text-to-speech feedback
 
 ## Project Structure
 
-- `app.py` - Main Streamlit application
+- `app.py` - Main Streamlit application with authentication integration
+- `auth.py` - Authentication system and user management
 - `utils.py` - Utility functions and helper methods
+- `mock_interview.py` - Mock interview system with AI evaluation
+- `voice_assistant.py` - Voice assistant with three-stage processing
 - `prompt.py` - Prompt template
 - `requirements.txt` - Project dependencies
+- `init_database.py` - Database initialization script
+- `test_auth.py` - Authentication system test suite
+- `AUTHENTICATION_GUIDE.md` - Detailed authentication documentation
+- `users.db` - SQLite database (created after initialization)
 
-- `google API key` - AIzaSyCgTsS9ZzEPX_5PKnFPfa0eYHbS0uGd9QU
+## Database Schema
+
+The application uses SQLite with the following main tables:
+- **users** - User accounts and authentication data
+- **user_sessions** - Login sessions and tokens
+- **learning_progress** - Saved learning paths and progress
+- **interview_sessions** - Mock interview results and reports
+- **user_preferences** - User-specific application settings
+
+See `AUTHENTICATION_GUIDE.md` for detailed database documentation.
+
+## Security Features
+
+- 🔐 Secure password hashing with PBKDF2 and random salts
+- 🎫 Token-based session management with expiration
+- ✅ Input validation and SQL injection prevention
+- 🧹 Automatic cleanup of expired sessions
+- 📧 Email format validation
+- 💪 Strong password requirements enforcement
 
 
 

@@ -3,9 +3,11 @@ from streamlit_webrtc import webrtc_streamer, WebRtcMode
 from utils import run_agent_sync
 from mock_interview import MockInterviewSystem, INTERVIEW_TYPES, LANGUAGES
 from voice_assistant import VoiceAssistant, VoiceCommandType
+from auth import auth_manager, show_login_form, show_register_form, show_user_profile, require_auth, show_auth_sidebar
 import threading
 import time
 import pyttsx3
+import json
 
 st.set_page_config(page_title="AI Learning & Interview Platform", page_icon="🤖", layout="wide")
 
@@ -63,11 +65,121 @@ if 'goal_uploaded_file_name' not in st.session_state:
     st.session_state.goal_uploaded_file_name = None
 if 'goal_camera_facing' not in st.session_state:
     st.session_state.goal_camera_facing = "Front"
+if 'show_profile' not in st.session_state:
+    st.session_state.show_profile = False
+if 'show_learning_history' not in st.session_state:
+    st.session_state.show_learning_history = False
+if 'show_interview_history' not in st.session_state:
+    st.session_state.show_interview_history = False
 
+# Check authentication status
+is_authenticated = st.session_state.get('is_authenticated', False)
+
+if not is_authenticated:
+    # Show login/register interface when not authenticated
+    st.title("🔐 Welcome to AI Learning & Interview Platform")
+    st.markdown("**Please login or register to access the platform**")
+    
+    # Create two columns for login and register
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("🔑 Login")
+        with st.form("login_form"):
+            username_or_email = st.text_input("Username or Email")
+            password = st.text_input("Password", type="password")
+            login_submit = st.form_submit_button("Login", type="primary")
+            
+            if login_submit:
+                if username_or_email and password:
+                    success, message = auth_manager.login_user(username_or_email, password)
+                    if success:
+                        st.success(message)
+                        st.rerun()
+                    else:
+                        st.error(message)
+                else:
+                    st.error("Please fill in all fields")
+    
+    with col2:
+        st.subheader("📝 Register")
+        with st.form("register_form"):
+            username = st.text_input("Username")
+            email = st.text_input("Email")
+            full_name = st.text_input("Full Name (Optional)")
+            password = st.text_input("Password", type="password")
+            confirm_password = st.text_input("Confirm Password", type="password")
+            register_submit = st.form_submit_button("Register", type="primary")
+            
+            if register_submit:
+                if username and email and password and confirm_password:
+                    if password != confirm_password:
+                        st.error("Passwords do not match")
+                    else:
+                        success, message = auth_manager.register_user(username, email, password, full_name)
+                        if success:
+                            st.success(message)
+                            st.info("Please login with your credentials")
+                        else:
+                            st.error(message)
+                else:
+                    st.error("Please fill in all required fields")
+    
+    # Show features preview
+    st.markdown("---")
+    st.subheader("🚀 Platform Features")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        **📚 Learning Path Generator**
+        - Generate personalized learning paths
+        - YouTube content integration
+        - Google Drive/Notion integration
+        - Progress tracking
+        """)
+    
+    with col2:
+        st.markdown("""
+        **🎯 Mock Interview Simulator**
+        - AI-driven interview questions
+        - Voice assistant integration
+        - Real-time feedback
+        - Multi-language support
+        """)
+    
+    st.stop()  # Stop execution here if not authenticated
+
+# User is authenticated - show main application
 st.title("🤖 Based Intelligent Agents Learning With Model Context Protocol And Large language Model - Scale Dynamic pathways For Language Models Using Python")
 st.markdown("**Comprehensive Learning Paths + Mock Interview Simulations**")
 
-# Sidebar for API and URL configuration
+# Show welcome message and logout option
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.success(f"👋 Welcome back, {st.session_state.get('username', 'User')}! Your progress will be saved.")
+with col2:
+    if st.button("🚪 Logout", type="secondary"):
+        auth_manager.logout_user()
+        st.success("Logged out successfully")
+        st.rerun()
+
+# Sidebar for authenticated users
+st.sidebar.header("👤 User Profile")
+st.sidebar.success(f"Logged in as: {st.session_state.get('username', 'User')}")
+
+# Profile options
+if st.sidebar.button("📊 View Profile"):
+    st.session_state.show_profile = True
+
+if st.sidebar.button("📚 Learning History"):
+    st.session_state.show_learning_history = True
+
+if st.sidebar.button("🎯 Interview History"):
+    st.session_state.show_interview_history = True
+
+st.sidebar.markdown("---")
 st.sidebar.header("🔧 Configuration")
 
 # API Key input
@@ -246,6 +358,29 @@ with tab1:
                 if result and "messages" in result:
                     for msg in result["messages"]:
                         st.markdown(f"📚 {msg.content}")
+                    
+                    # Save learning progress if user is authenticated
+                    if st.session_state.get('is_authenticated'):
+                        progress_data = {
+                            'goal': user_goal,
+                            'messages': [msg.content for msg in result["messages"]],
+                            'generated_at': time.time(),
+                            'api_config': {
+                                'secondary_tool': secondary_tool,
+                                'youtube_url': youtube_pipedream_url,
+                                'drive_url': drive_pipedream_url,
+                                'notion_url': notion_pipedream_url
+                            }
+                        }
+                        success = auth_manager.save_learning_progress(
+                            st.session_state.user_id, 
+                            user_goal, 
+                            progress_data
+                        )
+                        if success:
+                            st.success("💾 Learning path saved to your profile!")
+                        else:
+                            st.warning("⚠️ Could not save learning path")
                 else:
                     st.error("No results were generated. Please try again.")
                     st.session_state.is_generating = False
@@ -742,6 +877,32 @@ with tab2:
                             st.subheader("📝 Detailed Feedback")
                             st.markdown(final_report.get('detailed_feedback', 'No detailed feedback available'))
                             
+                            # Save interview session if user is authenticated
+                            if st.session_state.get('is_authenticated'):
+                                interview_data = {
+                                    'interview_type': interview_category,
+                                    'role': role,
+                                    'language': language,
+                                    'difficulty': difficulty,
+                                    'session_data': {
+                                        'interview_history': st.session_state.interview_history,
+                                        'candidate_profile': st.session_state.mock_interview.candidate_profile if st.session_state.mock_interview else {},
+                                        'pretest_result': st.session_state.pretest_result,
+                                        'coding_problem': st.session_state.coding_problem,
+                                        'test_output': st.session_state.test_output
+                                    },
+                                    'final_report': final_report,
+                                    'completed_at': time.time()
+                                }
+                                success = auth_manager.save_interview_session(
+                                    st.session_state.user_id,
+                                    interview_data
+                                )
+                                if success:
+                                    st.success("💾 Interview session saved to your profile!")
+                                else:
+                                    st.warning("⚠️ Could not save interview session")
+                            
                             # Reset interview
                             if st.button("🔄 Start New Interview"):
                                 st.session_state.interview_active = False
@@ -749,5 +910,82 @@ with tab2:
                                 st.session_state.interview_history = []
                                 st.session_state.current_question = None
                                 st.rerun()
+
+# Handle profile and history displays
+if st.session_state.get('show_profile'):
+    st.markdown("---")
+    st.header("👤 User Profile")
+    show_user_profile()
+    if st.button("Close Profile"):
+        st.session_state.show_profile = False
+        st.rerun()
+
+if st.session_state.get('show_learning_history'):
+    st.markdown("---")
+    st.header("📚 Learning History")
+    
+    progress = auth_manager.get_learning_progress(st.session_state.user_id)
+    
+    if progress:
+        for i, p in enumerate(progress):
+            with st.expander(f"Goal: {p['learning_goal'][:50]}...", expanded=(i==0)):
+                st.write(f"**Status:** {p['status']}")
+                st.write(f"**Created:** {p['created_at']}")
+                st.write(f"**Updated:** {p['updated_at']}")
+                
+                # Try to parse and display progress data
+                try:
+                    import json
+                    progress_data = json.loads(p['progress_data'])
+                    if 'messages' in progress_data:
+                        st.write("**Learning Path:**")
+                        for msg in progress_data['messages']:
+                            st.write(f"• {msg}")
+                except:
+                    st.write("**Progress Data:**", p['progress_data'])
+    else:
+        st.info("No learning progress yet. Start by creating a learning path!")
+    
+    if st.button("Close Learning History"):
+        st.session_state.show_learning_history = False
+        st.rerun()
+
+if st.session_state.get('show_interview_history'):
+    st.markdown("---")
+    st.header("🎯 Interview History")
+    
+    sessions = auth_manager.get_interview_sessions(st.session_state.user_id)
+    
+    if sessions:
+        for i, s in enumerate(sessions):
+            with st.expander(f"{s['interview_type'].title()} - {s['role']}", expanded=(i==0)):
+                st.write(f"**Language:** {s['language']}")
+                st.write(f"**Difficulty:** {s['difficulty']}")
+                st.write(f"**Status:** {s['status']}")
+                st.write(f"**Date:** {s['created_at']}")
+                
+                # Try to parse and display final report
+                try:
+                    import json
+                    if s['final_report']:
+                        report = json.loads(s['final_report'])
+                        if 'overall_score' in report:
+                            st.write(f"**Overall Score:** {report['overall_score']}/10")
+                        if 'strengths' in report and report['strengths']:
+                            st.write("**Strengths:**")
+                            for strength in report['strengths'][:3]:
+                                st.write(f"• {strength}")
+                        if 'weaknesses' in report and report['weaknesses']:
+                            st.write("**Areas for Improvement:**")
+                            for weakness in report['weaknesses'][:3]:
+                                st.write(f"• {weakness}")
+                except:
+                    pass
+    else:
+        st.info("No interview sessions yet. Start by taking a mock interview!")
+    
+    if st.button("Close Interview History"):
+        st.session_state.show_interview_history = False
+        st.rerun()
 
 

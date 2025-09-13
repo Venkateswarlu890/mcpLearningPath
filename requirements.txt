@@ -11,3 +11,13 @@ pyttsx3
 scikit-learn<1.6
 numpy<2
 pyaudio; platform_system=="Windows"
+# Authentication and Database
+sqlite3
+hashlib
+secrets
+datetime
+re
+# Additional security
+bcrypt>=4.0.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
